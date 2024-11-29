@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Web.WafCore;
 
@@ -229,24 +230,33 @@ namespace Web.WafCore
                 if (contentType.Contains("multipart/form-data"))
                 {
                     var form = await context.Request.ReadFormAsync();
-                    foreach (var file in form.Files)
-                    {
-                        if (file.Length > 1000000)
-                        {
-                            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                            context.Response.ContentType = HtmlContentType;
-                            await context.Response.WriteAsync(HTMLMessage(_options.FileUploadMessage, _options.FileUploadDescription));
-                            return true;
-                        }
-                        if (file.FileName.EndsWith(".exe") || file.FileName.EndsWith(".dll") || file.FileName.EndsWith(".bat") || file.FileName.EndsWith(".js"))
-                        {
-                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                            context.Response.ContentType = HtmlContentType;
-                            await context.Response.WriteAsync(HTMLMessage(_options.FileUploadMessage, _options.FileUploadDescription));
-                            return true;
-                        }
-                    }
+                    if (await HandleLargeFiles(context, form) || await HandleForbiddenFileTypes(context, form))
+                        return true;
                 }
+            }
+            return false;
+        }
+
+        private async Task<bool> HandleLargeFiles(HttpContext context, IFormCollection form)
+        {
+            if (form.Files.Any(file => file.Length > 1000000))
+            {
+                context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                context.Response.ContentType = HtmlContentType;
+                await context.Response.WriteAsync(HTMLMessage(_options.FileUploadMessage, _options.FileUploadDescription));
+                return true;
+            }
+            return false;
+        }
+
+        private async Task<bool> HandleForbiddenFileTypes(HttpContext context, IFormCollection form)
+        {
+            if (form.Files.Any(file => file.FileName.EndsWith(".exe") || file.FileName.EndsWith(".dll") || file.FileName.EndsWith(".bat") || file.FileName.EndsWith(".js")))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = HtmlContentType;
+                await context.Response.WriteAsync(HTMLMessage(_options.FileUploadMessage, _options.FileUploadDescription));
+                return true;
             }
             return false;
         }
