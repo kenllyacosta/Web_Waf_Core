@@ -379,7 +379,7 @@ namespace Microsoft.AspNetCore.Builder
         {
             var options = new WafConfiguration();
             configureOptions(options);
-            return builder.UseMiddleware<WafLibrary>(options);
+            return builder.UseMiddleware<WafLibraryCore>(options);
         }
 
         /// <summary>
@@ -390,7 +390,7 @@ namespace Microsoft.AspNetCore.Builder
         public static IApplicationBuilder UseWaf(this IApplicationBuilder builder)
         {
             var options = new WafConfiguration();
-            return builder.UseMiddleware<WafLibrary>(options);
+            return builder.UseMiddleware<WafLibraryCore>(options);
         }
     }
 }
