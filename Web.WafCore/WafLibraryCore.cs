@@ -10,6 +10,8 @@ namespace Web.WafCore
 {
     public class WafLibraryCore
     {
+        private const string HtmlContentType = "text/html";
+
         private readonly RequestDelegate _next;
         private readonly IMemoryCache _cache;
         private static readonly object _lock = new object();
@@ -39,138 +41,188 @@ namespace Web.WafCore
                 return;
             }
 
-            // Detects too many requests
+            if (await HandleRateLimit(context, clientIp) || await HandleSQLInjection(context) || await HandlePathTraversal(context) || await HandleXSS(context) || await HandleCSRF(context) || await HandleCommandInjection(context) || await HandleLFI(context) || await HandleRFI(context) || await HandleRCE(context) || await HandleSSRF(context) || await HandleXXE(context) || await HandleLDAPInjection(context) || await HandleDoSAttacks(context) || await HandleBadUserAgents(context) || await HandleFileUploads(context))
+                return;
+
+            await _next(context);
+        }
+
+        private async Task<bool> HandleRateLimit(HttpContext context, string clientIp)
+        {
             if (_options.RateLimitRequests && TooManyRequestsFrom(clientIp))
             {
                 _logger.Log(_options.BlockedRequestLogLevel, "Too many requests from IP: {ClientIp}", clientIp);
                 context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.TooManyRequestsMessage, _options.TooManyRequestsDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects SQL Injection
+        private async Task<bool> HandleSQLInjection(HttpContext context)
+        {
             if (_options.BlockSQLInjection && (context.Request.QueryString.Value.ToLower().Contains("1=1") || context.Request.QueryString.Value.ToLower().Contains("union select") || context.Request.QueryString.Value.Contains("--") || context.Request.QueryString.Value.ToLower().Contains("drop")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.SQLInjectionMessage, _options.SQLInjectionDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects path traversal
+        private async Task<bool> HandlePathTraversal(HttpContext context)
+        {
             if (_options.BlockPathTraversal && (context.Request.Path.Value.Contains("../") || context.Request.Path.Value.Contains("..\\") ||
                 context.Request.QueryString.Value.Contains("../") || context.Request.QueryString.Value.Contains("..\\")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.PathTraversalMessage, _options.PathTraversalDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects XSS
+        private async Task<bool> HandleXSS(HttpContext context)
+        {
             if (_options.BlockXSS && (context.Request.QueryString.Value.ToLower().Contains("script") || context.Request.QueryString.Value.ToLower().Contains("alert(")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.XSSMessage, _options.XSSDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects CSRF
-            if (_options.BlockCSRF && (!context.Request.Headers["Referer"].ToString().Contains(context.Request.Host.ToString())))
+        private async Task<bool> HandleCSRF(HttpContext context)
+        {
+            if (_options.BlockCSRF && !string.IsNullOrWhiteSpace(context.Request.Headers["Referer"].ToString()) && (!context.Request.Headers["Referer"].ToString().Contains(context.Request.Host.ToString())))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.CSRFMessage, _options.CSRFDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detect Command Injection
+        private async Task<bool> HandleCommandInjection(HttpContext context)
+        {
             if (_options.BlockCommandInjection && (context.Request.Path.Value.Contains(";") || context.Request.QueryString.Value.Contains(";") || context.Request.QueryString.Value.Contains("&") || context.Request.QueryString.Value.Contains("|") || context.Request.QueryString.Value.Contains("$") || context.Request.QueryString.Value.Contains("`")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.CommandInjectionMessage, _options.CommandInjectionDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects LFI
+        private async Task<bool> HandleLFI(HttpContext context)
+        {
             if (_options.BlockLFI && (context.Request.QueryString.Value.ToLower().Contains("/etc/passwd") || context.Request.QueryString.Value.ToLower().Contains("/etc/shadow") || context.Request.QueryString.Value.ToLower().Contains("/proc/self/environ")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.LFIMessage, _options.LFIDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detect Remote File Inclusion
+        private async Task<bool> HandleRFI(HttpContext context)
+        {
             if (_options.BlockRFI && (context.Request.QueryString.Value.ToLower().Contains("http") || context.Request.QueryString.Value.ToLower().Contains("https") || context.Request.QueryString.Value.ToLower().Contains("ftp")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.RFIMessage, _options.RFIDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects RCE
+        private async Task<bool> HandleRCE(HttpContext context)
+        {
             if (_options.BlockRCE && (context.Request.QueryString.Value.ToLower().Contains("system") || context.Request.QueryString.Value.ToLower().Contains("exec") || context.Request.QueryString.Value.ToLower().Contains("shell_exec") || context.Request.QueryString.Value.ToLower().Contains("passthru")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.RCEMessage, _options.RCEMessage));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects SSRF
+        private async Task<bool> HandleSSRF(HttpContext context)
+        {
             if (_options.BlockSSRF && context.Request.QueryString.Value.ToLower().Contains("localhost"))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.SSRFMessage, _options.SSRFDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects XXE XML External Entity Injection
+        private async Task<bool> HandleXXE(HttpContext context)
+        {
             if (_options.BlockXXE && (context.Request.QueryString.Value.ToUpper().Contains("!ENTITY") || context.Request.QueryString.Value.ToUpper().Contains("SYSTEM")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.XXEMessage, _options.XXEDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects LDAP injection
+        private async Task<bool> HandleLDAPInjection(HttpContext context)
+        {
             if (_options.BlockLDAPInjection && (context.Request.QueryString.Value.Contains("*") || context.Request.QueryString.Value.Contains("(") || context.Request.QueryString.Value.Contains(")")))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.LDAPInjectionMessage, _options.LDAPInjectionDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detects DDOS 
+        private async Task<bool> HandleDoSAttacks(HttpContext context)
+        {
             if (_options.BlockDoSAttacks && context.Request.QueryString.Value.Length > 2000)
             {
                 context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = HtmlContentType;
                 await context.Response.WriteAsync(HTMLMessage(_options.DoSAttackMessage, _options.DoSAttackDescription));
-                return;
+                return true;
             }
+            return false;
+        }
 
-            // Detect malicious user-agents
+        private async Task<bool> HandleBadUserAgents(HttpContext context)
+        {
             if (_options.BlockBadUserAgents)
             {
                 var userAgent = context.Request.Headers["User-Agent"].ToString().ToLower();
                 if (userAgent.Contains("sqlmap") || userAgent.Contains("nmap") || userAgent.Contains("crawler"))
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    context.Response.ContentType = "text/html";
+                    context.Response.ContentType = HtmlContentType;
                     await context.Response.WriteAsync(HTMLMessage(_options.BadUserAgentMessage, _options.BadUserAgentDescription));
-                    return;
+                    return true;
                 }
             }
+            return false;
+        }
 
+        private async Task<bool> HandleFileUploads(HttpContext context)
+        {
             if (_options.BlockFileUploads && context.Request.Method == "POST")
             {
                 var contentType = context.Request.ContentType;
@@ -182,22 +234,21 @@ namespace Web.WafCore
                         if (file.Length > 1000000)
                         {
                             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                            context.Response.ContentType = "text/html";
+                            context.Response.ContentType = HtmlContentType;
                             await context.Response.WriteAsync(HTMLMessage(_options.FileUploadMessage, _options.FileUploadDescription));
-                            return;
+                            return true;
                         }
                         if (file.FileName.EndsWith(".exe") || file.FileName.EndsWith(".dll") || file.FileName.EndsWith(".bat") || file.FileName.EndsWith(".js"))
                         {
                             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                            context.Response.ContentType = "text/html";
+                            context.Response.ContentType = HtmlContentType;
                             await context.Response.WriteAsync(HTMLMessage(_options.FileUploadMessage, _options.FileUploadDescription));
-                            return;
+                            return true;
                         }
                     }
                 }
             }
-
-            await _next(context);
+            return false;
         }
 
         private bool TooManyRequestsFrom(string clientIp)
@@ -364,7 +415,6 @@ namespace Web.WafCore
         public string SupportEmail { get; set; } = "info@dominio.com";
     }
 }
-
 namespace Microsoft.AspNetCore.Builder
 {
     public static class WafMiddlewareExtensions
